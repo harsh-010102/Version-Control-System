@@ -196,6 +196,99 @@ int main(int argc, char *argv[])
 
     }
 
+    else if(command == "commit-tree") {
+        // cout << argc;
+        try {
+            if (argc != 5 && argc != 7) {
+                cerr << "Incorrect command git commit-tree requires 5 or 7 arguments" << endl;
+                return EXIT_FAILURE;
+            }
+            string treeSha;
+            string parentSha;
+            string msg; 
+            if(argc == 5) {
+                if(string(argv[3]) != "-m") {
+                    cerr << "Incorrect command (git commit-tree <treeSha> -m message)" << endl;
+                    return EXIT_FAILURE;
+                }
+                if(string(argv[2]).size() != 40) {
+                    cerr << "Incorrect command (treeSha should be of 40 char)" << endl;
+                    return EXIT_FAILURE;                    
+                }
+                treeSha = argv[2];
+                msg = argv[4];
+            }
+            else if(argc == 7) {
+                if(string(argv[3]) != "-p") {
+                    cerr << "Incorrect command (git commit-tree <treeSha> -p <parentSha> -m message)" << endl;
+                    return EXIT_FAILURE;
+                }
+  
+                if(string(argv[5]) != "-m") {
+                    cerr << "Incorrect command (git commit-tree <treeSha> -p <parentSha> -m message)" << endl;
+                    return EXIT_FAILURE;
+                }
+                if(string(argv[2]).size() != 40) {
+                    cerr << "Incorrect command (treeSha should be of 40 char)" << endl;
+                    return EXIT_FAILURE;                    
+                }
+
+                if(string(argv[4]).size() != 40) {
+                    cerr << "Incorrect command (parentSha should be of 40 char)" << endl;
+                    return EXIT_FAILURE;                    
+                }
+
+                treeSha = argv[2];
+                parentSha = argv[4];
+                msg = argv[6];
+            }
+            commitTree(treeSha, parentSha, msg);
+        }
+        catch (const runtime_error& e) {
+            cerr << "Error: " << e.what() << endl;
+            return EXIT_FAILURE;
+        } 
+        catch (const exception& e) {
+            cerr << "Unexpected error: " << e.what() << endl;
+            return EXIT_FAILURE;
+        }
+        catch (...) {
+            cerr << "An unknown error occurred." << endl;
+            return EXIT_FAILURE;
+        }
+
+    }
+
+
+    else if(command == "add") {
+
+        try {
+            if (argc < 3) {
+                cerr << "Incorrect command git add-tree requires min 3 arguments" << endl;
+                return EXIT_FAILURE;
+            }
+            string fileName = argv[2];
+            if(fileName == ".") {
+                addAllFiles();
+            }
+        }
+
+        catch (const runtime_error& e) {
+            cerr << "Error: " << e.what() << endl;
+            return EXIT_FAILURE;
+        } 
+        catch (const exception& e) {
+            cerr << "Unexpected error: " << e.what() << endl;
+            return EXIT_FAILURE;
+        }
+        catch (...) {
+            cerr << "An unknown error occurred." << endl;
+            return EXIT_FAILURE;
+        }
+
+    }
+
+
     else {
         cerr << "Unknown command " << command << '\n';
         return EXIT_FAILURE;
