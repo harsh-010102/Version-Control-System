@@ -4,8 +4,6 @@
 #include <string>
 #include <vector>
 #include <zlib.h>
-#include <sys/stat.h>
-
 #include <openssl/sha.h>
 #include <iomanip>
 #include "utils.h"
@@ -16,191 +14,21 @@ constexpr size_t BUFFER_SIZE = 16384;
 
 using namespace std;
 
-string readFile(string filePath) {
+string readFile(string& filePath) {
     ifstream inputFile(filePath, ios::binary);
     if (!inputFile) {
-        throw runtime_error("Failed to open file: " + filePath);
+        cerr << "Failed to open file: " << filePath;
     }
 
     ostringstream contentStream;
     contentStream << inputFile.rdbuf();
-    inputFile.close();
+
     return contentStream.str();
 }
 
 
-
-void decompressZlib(string &fileSha, string option) {
-    // Open input file
-    string folder = fileSha.substr(0, 2);
-    string file = fileSha.substr(2);
-
-    string inputFile = "./.git/objects/" + folder + '/' + file;
-
-    ifstream input(inputFile, ios::binary);
-    if (!input) {
-        throw runtime_error(" File didn't exists: " + inputFile);
-        return;
-    }
-
-    // Initialize zlib inflate stream
-    z_stream strm{};
-    strm.zalloc = Z_NULL;
-    strm.zfree = Z_NULL;
-    strm.opaque = Z_NULL;
-
-    if (inflateInit(&strm) != Z_OK) {
-        throw runtime_error("Failed to initialize zlib.");
-        return;
-    }
-
-    vector<char> inBuffer(BUFFER_SIZE);
-    vector<char> outBuffer(BUFFER_SIZE);
-
-    int result = Z_OK;
-    string header;
-    size_t decompressedSize = 0;
-    string fileHeader;
-
-    while (result != Z_STREAM_END) {
-        input.read(inBuffer.data(), BUFFER_SIZE);
-        strm.avail_in = static_cast<uInt>(input.gcount());
-
-        if (input.fail() && !input.eof()) {
-            inflateEnd(&strm);
-            throw runtime_error("Error reading input file.");
-            return;
-        }
-
-        strm.next_in = reinterpret_cast<Bytef*>(inBuffer.data());
-
-        // Decompress until all input is processed
-        do {
-            strm.avail_out = BUFFER_SIZE;
-            strm.next_out = reinterpret_cast<Bytef*>(outBuffer.data());
-
-            result = inflate(&strm, Z_NO_FLUSH);
-
-            if (result == Z_MEM_ERROR || result == Z_DATA_ERROR || result == Z_STREAM_ERROR) {
-                inflateEnd(&strm);
-                throw runtime_error("Decompression error: "  + result);
-                return ;
-            }
-
-            size_t have = BUFFER_SIZE - strm.avail_out;
-
-            if (header.empty()) {
-                // Extract the header to skip it
-                header.append(outBuffer.data(), have);
-            
-                size_t pos = header.find('\0');
-
-                if (pos != string::npos) {
-                    // Extract file type from header
-                    fileHeader = header.substr(0, pos);
-
-                    if(fileHeader.substr(0, 4) == "tree") {
-                        decompressZlibTree(fileSha, false);
-                        return; 
-                    } 
-
-                    string remainingData = header.substr(pos + 1);
-                    decompressedSize += remainingData.size();
-                    
-                    if (option == "-p") {
-                        cout.write(remainingData.data(), remainingData.size());
-                    }
-
-                    header.clear();
-                }
-            } 
-            else {
-                decompressedSize += have;
-
-                if (option == "-p") {
-                    cout.write(outBuffer.data(), have);
-                    
-                }
-            }
-
-            if (cout.fail()) {
-                inflateEnd(&strm);
-                throw runtime_error("Error writing to standard output.");
-                return;
-            }
-
-        } while (strm.avail_out == 0);
-    }
-
-    inflateEnd(&strm);
-
-    if (result != Z_STREAM_END) {
-        throw runtime_error("Decompression did not complete successfully.");
-        return;
-    }   
-
-    // Handle other options
-    int idx = fileHeader.find(' ');
-    string fileType = fileHeader.substr(0, idx);
-
-    if (option == "-s") {
-        cout << decompressedSize << "\n";
-    } 
-    else if (option == "-t") {
-        cout << fileType << "\n";
-    }
-
-    return;
-}
-
-string getShaOfContent(string &content) {
-    string hash(SHA_DIGEST_LENGTH, '\0');  // Create a string with SHA_DIGEST_LENGTH (20) null characters
-    SHA1(reinterpret_cast<const unsigned char*>(content.c_str()), content.size(), reinterpret_cast<unsigned char*>(&hash[0]));
-    return hash;  
-}
-
-
-string getHexSha(string &sha) {
-    ostringstream sha_hexadecimal;
-    for (unsigned char char_ : sha) {
-        sha_hexadecimal << std::hex << std::setw(2) << std::setfill('0') << (int)(char_);
-    }
-    return sha_hexadecimal.str();
-}
-
-string compressContent(string &content) {
-    vector<char> compressedBuffer(compressBound(content.size()));
-
-    uLongf compressedSize = compressedBuffer.size();
-    int result = compress(reinterpret_cast<Bytef*>(compressedBuffer.data()), &compressedSize,
-                          reinterpret_cast<const Bytef*>(content.data()), content.size());
-
-    if (result != Z_OK) {
-        throw std::runtime_error("Compression failed!");
-    }
-
-    return string(compressedBuffer.data(), compressedSize);
-}
-
-void storeCompressDataInFile(string &content, string &sha1) {
-    string directory = ".git/objects/" + sha1.substr(0, 2);
-    string filename = sha1.substr(2);
-    // cout << directory << "\n";
-    mkdir(directory.c_str(), 0777);
-
-    string filepath = directory + "/" + filename;
-    ofstream outfile(filepath, ios::binary);
-
-    outfile.write(content.c_str(), content.size());
-    outfile.close();
-}
-
-void decompressZlibTree(string &sha, bool option) {
-    string dirName = sha.substr(0, 2); 
-    string fileName = sha.substr(2);  
-    string inputFilePath =  "./.git/objects/" + dirName + "/" + fileName;
-
-    string compressedData = readFile(inputFilePath);
+void decompressZlibTree(string &inputFile, bool option) {
+    string compressedData = readFile(inputFile);
     z_stream stream;
     stream.zalloc = Z_NULL;
     stream.zfree = Z_NULL;
@@ -209,7 +37,8 @@ void decompressZlibTree(string &sha, bool option) {
     stream.next_in = reinterpret_cast<Bytef *>(const_cast<char *>(compressedData.data()));
 
     if (inflateInit(&stream) != Z_OK) {
-        throw runtime_error("Failed to initialize zlib");
+        cerr << "Failed to initialize zlib";
+        return;
     }
 
     string uncompressedData;
@@ -223,7 +52,7 @@ void decompressZlibTree(string &sha, bool option) {
 
         if (ret == Z_MEM_ERROR || ret == Z_DATA_ERROR || ret == Z_STREAM_ERROR) {
             inflateEnd(&stream);
-            throw runtime_error("Error during decompression");
+            cerr << "Error during decompression";
             return;
         }
         
@@ -231,20 +60,10 @@ void decompressZlibTree(string &sha, bool option) {
     } while (ret != Z_STREAM_END);
 
     inflateEnd(&stream);
-    if(uncompressedData.substr(0, 4) == "blob") {
-        throw runtime_error("fatal: not a tree object");
-    }
-    else if(uncompressedData.substr(0, 6) == "commit") {
-        
-        int idx = uncompressedData.find('\0');
-        uncompressedData = uncompressedData.substr(idx + 1);
-        
-        idx = uncompressedData.find(' '); 
-        string newSHA = uncompressedData.substr(idx + 1, 40);
-
-        decompressZlibTree(newSHA, option);
-
+    if(uncompressedData.substr(0, 4) != "tree") {
+        cout << "fatal: not a tree object" << "\n";
         return;
+
     }
     parseTreeObject(uncompressedData, option);
     return;
@@ -255,9 +74,9 @@ void parseTreeObject(string &uncompressedData, bool option) {
 
     // Skip the "tree <size>\0" part
     while (pos < uncompressedData.size() && uncompressedData[pos] != '\0') {
-        pos++;
+        ++pos;
     }
-    pos++;
+    ++pos;
 
     while (pos < uncompressedData.size()) {
 
@@ -308,161 +127,236 @@ void parseTreeObject(string &uncompressedData, bool option) {
 }
 
 
-static bool comp(const filesystem::directory_entry &p1, const filesystem::directory_entry &p2) {
-    return p1.path().filename().string() < p2.path().filename().string();
-}
-
-
-string writeTreeRec(filesystem::path path) {
-    if (filesystem::is_empty(path)) {
-        return string("");
-    }
-    vector<filesystem::directory_entry> entries;
-
-    for (auto it : filesystem::directory_iterator(path)){
-        if(it.path().filename() == ".git" || it.path().filename() == "build" || it.path().filename() == "CMakeFiles" ) {
-            continue;
-        }
-        entries.push_back(it);
+bool decompressZlib(string &inputFile, string option) {
+    // Open input file
+    ifstream input(inputFile, ios::binary);
+    if (!input) {
+        cerr << "File didn't exists: " << inputFile << endl;
+        return false;
     }
 
-    sort(entries.begin(), entries.end(), comp);
+    // Initialize zlib inflate stream
+    z_stream strm{};
+    strm.zalloc = Z_NULL;
+    strm.zfree = Z_NULL;
+    strm.opaque = Z_NULL;
 
-    ostringstream tree_body;
-    
-    for(auto it : entries) {
-        
-        if(it.is_directory()) {
-            string mode = "40000";  
-            string name = it.path().filename().string();
+    if (inflateInit(&strm) != Z_OK) {
+        cerr << "Failed to initialize zlib." << endl;
+        return false;
+    }
 
-            string directory_sha = writeTreeRec(it.path());
+    vector<char> inBuffer(BUFFER_SIZE);
+    vector<char> outBuffer(BUFFER_SIZE);
 
-            tree_body << mode << " " << name << '\0' << directory_sha;
+    int result = Z_OK;
+    string header;
+    size_t decompressedSize = 0;
+    string fileHeader;
+
+    while (result != Z_STREAM_END) {
+        input.read(inBuffer.data(), BUFFER_SIZE);
+        strm.avail_in = static_cast<uInt>(input.gcount());
+
+        if (input.fail() && !input.eof()) {
+            cerr << "Error reading input file." << endl;
+            inflateEnd(&strm);
+            return false;
         }
-        else {
-            struct stat fileStat;
-    
-            auto perm = filesystem::status(it).permissions();
-            unsigned int perm_value = static_cast<unsigned int>(perm) & 0777;  
-            // cout << to_string(perm_value) << "\n";
-            string mode = "100644";
-            // cout << mode << "\n";
+
+        strm.next_in = reinterpret_cast<Bytef*>(inBuffer.data());
+
+        // Decompress until all input is processed
+        do {
+            strm.avail_out = BUFFER_SIZE;
+            strm.next_out = reinterpret_cast<Bytef*>(outBuffer.data());
+
+            result = inflate(&strm, Z_NO_FLUSH);
+
+            if (result == Z_MEM_ERROR || result == Z_DATA_ERROR || result == Z_STREAM_ERROR) {
+                cerr << "Decompression error: " << result << endl;
+                inflateEnd(&strm);
+                return false;
+            }
+
+            size_t have = BUFFER_SIZE - strm.avail_out;
+
+            if (header.empty()) {
+                // Extract the header to skip it
+                header.append(outBuffer.data(), have);
             
-            string content = readFile(it.path().string());
-            string blobHeader = "blob " + to_string(content.size()) + '\0';
+                size_t pos = header.find('\0');
 
-            string blobContent = blobHeader + content;
-            string sha = getShaOfContent(blobContent);
+                if (pos != string::npos) {
+                    // Extract file type from header
+                    fileHeader = header.substr(0, pos);
 
-            tree_body << mode << " " << it.path().filename().string()<< '\0' << sha;
+                    if(fileHeader.substr(0, 4) == "tree") {
+                        decompressZlibTree(inputFile, false);
+                        return true; 
+                    } 
 
-            string hexSha = getHexSha(sha);
-            string compressData = compressContent(blobContent);
-            storeCompressDataInFile(compressData, hexSha); 
-               
-        }
-    }
-    string tree = "tree " + to_string(tree_body.str().size()) + '\0' + tree_body.str();
-    string shaBytes = getShaOfContent(tree);
-    string sha = getHexSha(shaBytes);
-    // cout << tree  << "\n"; 
+                    string remainingData = header.substr(pos + 1);
+                    decompressedSize += remainingData.size();
+                    
+                    if (option == "-p") {
+                        cout.write(remainingData.data(), remainingData.size());
+                    }
 
-    string compressedContent = compressContent(tree);
+                    header.clear();
+                }
+            } 
+            else {
+                decompressedSize += have;
 
-    storeCompressDataInFile(compressedContent, sha);
-    return shaBytes;
-}
+                if (option == "-p") {
+                    cout.write(outBuffer.data(), have);
+                    
+                }
+            }
 
-void writeTree(filesystem::path &path) {
-    string sha = writeTreeRec(path);
-    string hexSHA = getHexSha(sha); 
-    cout << hexSHA << "\n";
-    return;
-} 
+            if (cout.fail()) {
+                cerr << "Error writing to standard output." << endl;
+                inflateEnd(&strm);
+                return false;
+            }
 
-string exec(const char* cmd) {
-    char buffer[128];
-    std::string result = "";
-    FILE* pipe = popen(cmd, "r");
-    if (!pipe) return "Error";
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        result += buffer;
-    }
-    pclose(pipe);
-    return result;
-}
-
-pair<string, string> getUserInfo() {
-    const char* homeDir = getenv("HOME");  
-    string path = string(homeDir) + "/.gitconfig";
-
-    string gitConfigContent = readFile(path);
-
-    string userName, userEmail;
-    istringstream stream(gitConfigContent);
-    string line;
-
-    while (getline(stream, line)) {
-        if (line.find("name = ") != string::npos) {
-            userName = line.substr(line.find("name = ") + 7); // Extract the name value
-        }
-        if (line.find("email = ") != string::npos) {
-            userEmail = line.substr(line.find("email = ") + 8); // Extract the email value
-        }
+        } while (strm.avail_out == 0);
     }
 
-    return {userName, userEmail};
-}
+    inflateEnd(&strm);
 
-string getTimeStamp() {
-    string unixTimestamp = exec("git log -1 --format=%at");
-    string fullDate = exec("git log -1 --format=%ai");
+    if (result != Z_STREAM_END) {
+        cerr << "Decompression did not complete successfully." << endl;
+        return false;
+    }   
 
-    unixTimestamp.erase(remove(unixTimestamp.begin(), unixTimestamp.end(), '\n'), unixTimestamp.end());
-    fullDate.erase(remove(fullDate.begin(), fullDate.end(), '\n'), fullDate.end());
+    // Handle other options
+    int idx = fileHeader.find(' ');
+    string fileType = fileHeader.substr(0, idx);
 
-    size_t spacePos = fullDate.rfind(' ');
-    string timezoneOffset;
-    if (spacePos != string::npos) {
-        timezoneOffset = fullDate.substr(spacePos + 1);
+    
+    if (option == "-s") {
+        cout << decompressedSize << "\n";
+    } 
+    else if (option == "-t") {
+        cout << fileType << "\n";
     }
-    string unixTime = unixTimestamp + " " + timezoneOffset;
-    return unixTime;
-}
-void commitTree(string &treeSha, string &parentSha, string &msg) {
-    pair<string, string> p = getUserInfo();
 
-    string userName = p.first;
-    string email = p.second;
-
-    string unixTimestamp = getTimeStamp();
-    // cout << unixTimestamp << "\n";
-
-    ostringstream commitContent;
-
-    commitContent << "tree " << treeSha << "\n";
-    if(parentSha.size() > 0) {
-        commitContent <<  "parent  " << parentSha << "\n";
-    }
-    commitContent << "author " << userName << " " << email << " " << unixTimestamp << "\n";
-    commitContent << "committer  " << userName << " " << email << " " << unixTimestamp << "\n";
-
-    commitContent << "\n" << msg << "\n";
-
-    // cout << commitContent.str();
-
-    string commitHeader = "commit " + to_string(commitContent.str().size()) + '\0';
-    string commitBody = commitHeader + commitContent.str();
-
-    string commitSha = getShaOfContent(commitBody);
-    string commitHexSha = getHexSha(commitSha);
-
-    cout << commitHexSha << "\n";
-
-    string compressCommitData = compressContent(commitBody);
-    storeCompressDataInFile(compressCommitData, commitHexSha);
-    return;
+    return true;
 }
 
 
+bool compressFile(string& inputFilePath, string& outputFilePath) {
+    // Open the input file
+    ifstream inputFile(inputFilePath, ios::binary);
+    if (!inputFile) {
+        cerr << "Failed to open input file: " << inputFilePath << "\n";
+        return false;
+    }
+
+    // Get the input file size
+    filesystem::path filePath(inputFilePath);
+    uint64_t fileSize = filesystem::file_size(filePath);
+
+    // Read the input file content
+    string content((istreambuf_iterator<char>(inputFile)), istreambuf_iterator<char>());
+    
+    // Prepare to write the compressed data
+    ofstream outputFile(outputFilePath, ios::binary);
+    if (!outputFile) {
+        cerr << "Failed to create output file: " << outputFilePath << "\n";
+        return false;
+    }
+
+    // Create the header
+    ostringstream headerStream;
+    headerStream << "blob " << fileSize << '\0';
+    string header = headerStream.str();
+
+    // Combine header and content
+    string finalBuffer = header + content;
+
+    // Initialize zlib stream
+    z_stream strm;
+    strm.zalloc = Z_NULL;
+    strm.zfree = Z_NULL;
+    strm.opaque = Z_NULL;
+
+    // Initialize the compression level
+    if (deflateInit(&strm, Z_BEST_SPEED) != Z_OK) {
+        cerr << "Failed to initialize zlib for compression\n";
+        return false;
+    }
+
+    // Set the input data
+    strm.avail_in = finalBuffer.size();
+    strm.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(finalBuffer.data()));
+
+    // Prepare a buffer for the compressed data
+    vector<char> compressedBuffer(deflateBound(&strm, finalBuffer.size()));
+    strm.avail_out = compressedBuffer.size();
+    strm.next_out = reinterpret_cast<Bytef*>(compressedBuffer.data());
+
+    // Compress the data
+    int ret = deflate(&strm, Z_FINISH);
+    if (ret != Z_STREAM_END) {
+        deflateEnd(&strm);
+        cerr << "Compression failed\n";
+        return false;
+    }
+
+    // Calculate the size of the compressed data
+    size_t compressedSize = compressedBuffer.size() - strm.avail_out;
+
+    // Write the compressed data to the output file
+    outputFile.write(compressedBuffer.data(), compressedSize);
+
+    // Clean up
+    deflateEnd(&strm);
+    return true;
+}
+
+
+string sha1(string& filename) {
+    ifstream file(filename, ios::binary);
+    if (!file) {
+        cerr << "Could not open file: " << filename << endl;
+        return "";
+    } 
+
+    // Determine the file size
+    file.seekg(0, ios::end);
+    size_t fileSize = file.tellg();
+    file.seekg(0, ios::beg);
+
+    // Create the header: "blob <filesize>\0"
+    string header = "blob " + to_string(fileSize) + '\0';
+
+    SHA_CTX sha1;
+    SHA1_Init(&sha1);
+
+    // Update the hash with the header
+    SHA1_Update(&sha1, header.c_str(), header.size());
+
+    // Read the file and update the hash
+    const size_t bufferSize = 8192;
+    char buffer[bufferSize];
+
+    while (file.read(buffer, bufferSize)) {
+        SHA1_Update(&sha1, buffer, file.gcount());
+    }
+    // Process the remaining bytes if any
+    SHA1_Update(&sha1, buffer, file.gcount());
+
+    unsigned char hash[SHA_DIGEST_LENGTH];
+    SHA1_Final(hash, &sha1);
+
+    // Convert the hash to a hexadecimal string
+    ostringstream hexStream;
+    for (int i = 0; i < SHA_DIGEST_LENGTH; ++i) {
+        hexStream << hex << setw(2) << setfill('0') << static_cast<int>(hash[i]);
+    }
+
+    return hexStream.str();
+}

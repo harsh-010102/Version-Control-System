@@ -52,243 +52,95 @@ int main(int argc, char *argv[])
 
     else if(command == "cat-file") {
         // cout << command;
-
-        try {
-            if (argc < 4) {  // Corrected from 3 to 4 to account for fileSHA
-                cerr << "Incorrect command(git cat-file options <file-sha>)" << endl;
-                return EXIT_FAILURE;
-            }
-
-            string option = argv[2];
-            
-            if (option != "-p" && option != "-t" && option != "-s") {
-                cerr << "Incorrect command(git cat-file options <file-sha>)" << endl;
-                return EXIT_FAILURE;
-            }
-
-            string fileSha = argv[3];
-            if(fileSha.size() != 40) {
-                cerr << "Invalid Git blob hash length.\n";
-                return EXIT_FAILURE;
-            }
-
-
-            decompressZlib(fileSha, option);
-        } 
-        catch (const runtime_error& e) {
-            cerr << "Error: " << e.what() << endl;
+        if(argc < 3) {
+            cout << "Incorrect command(git cat-file options <file-sha>)";
             return EXIT_FAILURE;
         }
-        catch (const exception& e) {
-            cerr << "Unexpected error: " << e.what() << endl;
-            return EXIT_FAILURE;
-        } 
-        catch (...) {
-            cerr << "An unknown error occurred." << endl;
-            return EXIT_FAILURE;
-        }    
-    }
 
-    else if (command == "hash-object") {
-        try {
-            if (argc < 4 || string(argv[2]) != "-w") {
-                cout << "Incorrect command(git hash-object -w <file-name>)" << endl;
-                return EXIT_FAILURE;
-            }
-
-            string option = argv[2];
-            string fileName = argv[3];
+        string option = argv[2];
         
-            // cout     << objectFileName << "\n";
-            // cout << fileName << "\n";
-            string fileContent = readFile(fileName);
-            // cout << fileContent << "\n"
+        if(option != "-p" && option != "-t" && option != "-s") {
+            cout << "Incorrect command(git cat-file options <file-sha>)";
+            return EXIT_FAILURE;
+        }
+   
+        string fileSha = argv[3];
+        string folder = fileSha.substr(0, 2);
+        string file = fileSha.substr(2); 
+
+        string filePath = "./.git/objects/" + folder + '/' + file;
+        
+        vector<string> vec;
+
+        decompressZlib(filePath, option);
+    
+    }
+
+    else if(command == "hash-object") {
+        if(argc < 4) {
+            cout << "Incorrect command(git hash-object options <file-name>)";
+            return EXIT_FAILURE;
+        }
+
+        string option = argv[2];
+        string fileName = argv[3];
+
+        string fileSHA = sha1(fileName);
+    
+        string objectFolderName = "./.git/objects/" + fileSHA.substr(0, 2);
+        string objectFileName = objectFolderName + "/" + fileSHA.substr(2);
+        cout << objectFileName << "\n";
+
+        if(option == "-w") {
+            // cout << "Here " << "\n";
+            if (!filesystem::exists(objectFolderName)) {
+                // cout << "Folder created\n";
+                filesystem::create_directories(objectFolderName);
+            }
+
+            ofstream outFile(objectFileName, ios::binary);
             
-            string blobHeader = "blob " + to_string(fileContent.size()) + '\0';
-            string blobContent = blobHeader + fileContent;
+            if (!outFile) {
+                cerr << "Failed to create file: " << objectFileName << "\n";
+                return EXIT_FAILURE;
+            }   
 
-            string sha1 = getShaOfContent(blobContent);
-            string hexSha = getHexSha(sha1);
-            string compressBlobContent = compressContent(blobContent);
-            storeCompressDataInFile(compressBlobContent, hexSha);
+            if (!compressFile(fileName, objectFileName)) {
+                return EXIT_FAILURE;
+            }             
 
-            cout << hexSha << "\n";
-        } 
-        catch (const runtime_error& e) {
-            cerr << "Error: " << e.what() << endl;
-            return EXIT_FAILURE;
-        } 
-        catch (const exception& e) {
-            cerr << "Unexpected error: " << e.what() << endl;
-            return EXIT_FAILURE;
-        } 
-        catch (...) {
-            cerr << "An unknown error occurred." << endl;
-            return EXIT_FAILURE;
+            outFile.close();
         }
+
+        cout << fileSHA << "\n";
     }
 
-    else if (command == "ls-tree") {
-        try {
-           if (argc < 3) {
-                cerr << "Incorrect Parameter. git ls-tree --name-only <hash>\n";
-                return EXIT_FAILURE;
-            } 
-            if (argc == 4 && string(argv[2]) != "--name-only") {
-                cerr << "Missing parameter: --name-only <hash>\n";
-                return EXIT_FAILURE;
-            }
+    else if(command == "ls-tree") {
+        if(argc != 3 && argc != 4) {
+            cout << "Incorrect command(git ls-tree --name-only(optional) <file-sha>)";
+            return EXIT_FAILURE;
+        }
+        string treeSHA;
 
-            if(argc == 3){
-                string hash = argv[2];
-                if (hash.size() != 40) {
-                    cerr << "Invalid Git blob hash length.\n";
-                    return 1;
-                }
-                decompressZlibTree(hash, false);
-            } 
-            else {
-                string hash = argv[3];
-                if (hash.size() != 40) {
-                    cerr << "Invalid Git blob hash length.\n";
-                    return 1;
-                }
-                decompressZlibTree(hash, true);
+        bool option = false;
+        if(string(argv[2]) == "--name-only") {
+            // cout << argc;
+            if(argc != 4) {
+            cout << "Incorrect command(git ls-tree --name-only <file-sha>)";
+            return EXIT_FAILURE;
             }
-        } 
-        catch (const runtime_error& e) {
-            cerr << "Error: " << e.what() << endl;
-            return EXIT_FAILURE;
-        } 
-        catch (const exception& e) {
-            cerr << "Unexpected error: " << e.what() << endl;
-            return EXIT_FAILURE;
+            treeSHA = argv[3];
+            option = true;
         }
-        catch (...) {
-            cerr << "An unknown error occurred." << endl;
-            return EXIT_FAILURE;
+        else {
+            treeSHA = argv[2];
+            option = false;
         }
+        string objectFolderName = "./.git/objects/" + treeSHA.substr(0, 2);
+        string objectFileName = objectFolderName + "/" + treeSHA.substr(2);
+
+        decompressZlibTree(objectFileName, option);
     }
-
-    else if(command == "write-tree") {
-        try {
-            if (argc != 2) {
-                cerr << "Incorrect command(git write-tree)" << endl;
-                return EXIT_FAILURE;
-            }
-
-            filesystem::path current_path = filesystem::current_path();
-
-            writeTree(current_path);
-        }
-        catch (const runtime_error& e) {
-            cerr << "Error: " << e.what() << endl;
-            return EXIT_FAILURE;
-        } 
-        catch (const exception& e) {
-            cerr << "Unexpected error: " << e.what() << endl;
-            return EXIT_FAILURE;
-        }
-        catch (...) {
-            cerr << "An unknown error occurred." << endl;
-            return EXIT_FAILURE;
-        }
-
-    }
-
-    else if(command == "commit-tree") {
-        // cout << argc;
-        try {
-            if (argc != 5 && argc != 7) {
-                cerr << "Incorrect command git commit-tree requires 5 or 7 arguments" << endl;
-                return EXIT_FAILURE;
-            }
-            string treeSha;
-            string parentSha;
-            string msg; 
-            if(argc == 5) {
-                if(string(argv[3]) != "-m") {
-                    cerr << "Incorrect command (git commit-tree <treeSha> -m message)" << endl;
-                    return EXIT_FAILURE;
-                }
-                if(string(argv[2]).size() != 40) {
-                    cerr << "Incorrect command (treeSha should be of 40 char)" << endl;
-                    return EXIT_FAILURE;                    
-                }
-                treeSha = argv[2];
-                msg = argv[4];
-            }
-            else if(argc == 7) {
-                if(string(argv[3]) != "-p") {
-                    cerr << "Incorrect command (git commit-tree <treeSha> -p <parentSha> -m message)" << endl;
-                    return EXIT_FAILURE;
-                }
-  
-                if(string(argv[5]) != "-m") {
-                    cerr << "Incorrect command (git commit-tree <treeSha> -p <parentSha> -m message)" << endl;
-                    return EXIT_FAILURE;
-                }
-                if(string(argv[2]).size() != 40) {
-                    cerr << "Incorrect command (treeSha should be of 40 char)" << endl;
-                    return EXIT_FAILURE;                    
-                }
-
-                if(string(argv[4]).size() != 40) {
-                    cerr << "Incorrect command (parentSha should be of 40 char)" << endl;
-                    return EXIT_FAILURE;                    
-                }
-
-                treeSha = argv[2];
-                parentSha = argv[4];
-                msg = argv[6];
-            }
-            commitTree(treeSha, parentSha, msg);
-        }
-        catch (const runtime_error& e) {
-            cerr << "Error: " << e.what() << endl;
-            return EXIT_FAILURE;
-        } 
-        catch (const exception& e) {
-            cerr << "Unexpected error: " << e.what() << endl;
-            return EXIT_FAILURE;
-        }
-        catch (...) {
-            cerr << "An unknown error occurred." << endl;
-            return EXIT_FAILURE;
-        }
-
-    }
-
-
-    else if(command == "add") {
-
-        try {
-            if (argc < 3) {
-                cerr << "Incorrect command git add-tree requires min 3 arguments" << endl;
-                return EXIT_FAILURE;
-            }
-            string fileName = argv[2];
-            if(fileName == ".") {
-                addAllFiles();
-            }
-        }
-
-        catch (const runtime_error& e) {
-            cerr << "Error: " << e.what() << endl;
-            return EXIT_FAILURE;
-        } 
-        catch (const exception& e) {
-            cerr << "Unexpected error: " << e.what() << endl;
-            return EXIT_FAILURE;
-        }
-        catch (...) {
-            cerr << "An unknown error occurred." << endl;
-            return EXIT_FAILURE;
-        }
-
-    }
-
-
     else {
         cerr << "Unknown command " << command << '\n';
         return EXIT_FAILURE;
