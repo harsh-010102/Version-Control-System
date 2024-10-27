@@ -56,4 +56,6 @@ void writeTree(std::filesystem::path &path);
 
 void writeTree(map<filesystem::path, pair<string, string>>  &stagedFilesInfo, filesystem::path &path, string msg);
 
+void checkOut(string& commitSHA);
 #endif // UTILS_H
+

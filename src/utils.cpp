@@ -641,7 +641,7 @@ string writeTreeRec(map<filesystem::path, pair<string, string>>  &stagedFilesInf
 
     for (auto it : filesystem::directory_iterator(path)){
         if(it.path().filename() == ".git" || it.path().filename() == "build" || it.path().filename() == "CMakeFiles" ) {
-            continue;
+            continue;   
         }
         
         entries.push_back(it);
@@ -709,4 +709,147 @@ void writeTree(map<filesystem::path, pair<string, string>>  &stagedFilesInfo, fi
     commitTree(hexSHA, parentSha, msg);
     
     return;
-}   
+}  
+string decompressString(const string& compressed) {
+    z_stream zs; // zlib stream
+    memset(&zs, 0, sizeof(zs));
+
+    if (inflateInit(&zs) != Z_OK) {
+        throw runtime_error("inflateInit failed!");
+    }
+
+    zs.next_in = (Bytef*)compressed.data();
+    zs.avail_in = compressed.size();
+
+    int ret;
+    char buffer[32768];  // Buffer to hold decompressed data
+    stringstream decompressed;
+
+    do {
+        zs.next_out = reinterpret_cast<Bytef*>(buffer);
+        zs.avail_out = sizeof(buffer);
+
+        ret = inflate(&zs, 0);
+
+        if (decompressed.tellp() < zs.total_out) {
+            decompressed.write(buffer, zs.total_out - decompressed.tellp());
+        }
+
+    } while (ret == Z_OK);
+
+    inflateEnd(&zs);
+
+    if (ret != Z_STREAM_END) {
+        throw runtime_error("Exception during zlib decompression");
+    }
+
+    return decompressed.str();
+}
+
+string readCommitObject(string commitSha) {
+    string dir = commitSha.substr(0, 2);
+    string path = commitSha.substr(2);
+    string objectPath = "./.git/objects/" + dir + "/" + path;
+
+    ifstream fileStream(objectPath, ios::binary);
+    if (!fileStream.is_open()) {
+        throw runtime_error("Could not open the object file: " + objectPath);
+    }
+    stringstream buffer;
+    buffer << fileStream.rdbuf();
+    string compressedData = buffer.str();
+
+    return decompressString(compressedData);
+}
+
+void extractTree(string& treeSHA, filesystem::path &basePath) {
+    string treeContent = readCommitObject(treeSHA);
+
+    size_t nullPos = treeContent.find('\0');
+    if (nullPos != std::string::npos) {
+        treeContent = treeContent.substr(nullPos + 1);
+    }
+
+    int i = 0;
+    while (i < treeContent.size()) {
+        // Extract mode
+        std::string mode;
+        while (treeContent[i] != ' ') {
+            mode += treeContent[i];
+            i++;
+        }
+        i++; 
+
+        // Extract filename
+        string filename;
+        while (treeContent[i] != '\0') {
+            filename += treeContent[i];
+            i++;
+        }
+        i++;
+        const unsigned char* bytes = reinterpret_cast<const unsigned char*>(&treeContent[i]);
+
+        string sha = string(reinterpret_cast<const char*>(bytes), 20);
+        string hexsha = getHexSha(sha);
+        i += 20;
+
+        filesystem::path filePath = basePath / filename;
+        if (mode == "40000") { // Directory
+            filesystem::create_directories(filePath);
+            extractTree(hexsha, filePath);
+        } 
+        else if (mode.substr(0, 3) == "100") { // File
+            std::string blobContent = readCommitObject(hexsha);
+
+            // Remove the header from blobContent
+            size_t nullPos = blobContent.find('\0');
+            if (nullPos != std::string::npos) {
+                blobContent = blobContent.substr(nullPos + 1);
+            }
+
+            ofstream outFile(filePath, ios::binary);
+            outFile << blobContent;
+            outFile.close();
+        }
+    }
+}
+
+
+void removeAllExceptGit() {
+    for (auto& entry : filesystem::directory_iterator(".")) {
+        if (entry.path().filename() == ".git" || entry.path().filename() == "build" || 
+            entry.path().filename() == "vcpkg" || entry.path().filename() == "CMakeLists.txt" || 
+            entry.path().filename() == ".DS_Store") {
+            continue;
+        }
+        filesystem::remove_all(entry.path());
+    }
+}
+
+void checkOut(string& commitSHA) {
+    
+    removeAllExceptGit(); 
+    string commitContent = readCommitObject(commitSHA);
+    
+    size_t nullPos = commitContent.find('\0');
+    if (nullPos != string::npos) {
+        commitContent = commitContent.substr(nullPos + 1);
+    }
+    istringstream iss(commitContent);
+    string line;
+    string treeSHA;
+
+    while (std::getline(iss, line)) {
+        if (line.substr(0, 5) == "tree ") {
+            treeSHA = line.substr(5);
+            break;
+        }
+    }
+
+    if (treeSHA.empty()) {
+        throw std::runtime_error("No tree SHA found in commit.");
+    }
+
+    filesystem::path cwd = "./";
+    extractTree(treeSHA, cwd);
+}
